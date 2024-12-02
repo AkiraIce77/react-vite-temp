@@ -1,12 +1,12 @@
-import { useState } from "react";
+import { useState, Dispatch, SetStateAction } from 'react';
 
-interface StoreItem {
-  state: any;
-  dispatch: Set<any>;
+interface StoreItem<T> {
+  state: T;
+  dispatch: Set<Dispatch<SetStateAction<T>>>;
 }
 
 interface Store {
-  [key: string]: StoreItem;
+  [key: string]: StoreItem<any>;
 }
 
 interface KeyMap {
@@ -17,17 +17,19 @@ const isInitStore: KeyMap = {};
 const store: Store = {};
 
 function _setter<T>(key: string, value: T) {
-  store[key].state = value;
-  store[key].dispatch.forEach((cb: any) => {
+  const storeItem = store[key] as StoreItem<T>;
+  storeItem.state = value;
+  storeItem.dispatch.forEach((cb) => {
     cb(value);
   });
 }
 
 function subscribeStore<T>(key: string): [T, (state: T) => void] {
-  const [state, setState] = useState<T>(store[key].state);
+  const storeItem = store[key] as StoreItem<T>;
+  const [state, setState] = useState<T>(storeItem.state);
 
-  if (!store[key].dispatch.has(setState)) {
-    store[key].dispatch.add(setState);
+  if (!storeItem.dispatch.has(setState)) {
+    storeItem.dispatch.add(setState);
   }
 
   return [state, useDispatch<T>(key)];
@@ -38,9 +40,8 @@ export function useDispatch<T>(key: string) {
 }
 
 export function createStore<T>(key: string, state: T) {
-  // 如果没有被初始化，则初始化一次
   if (!isInitStore[key]) {
-    store[key] = { state, dispatch: new Set() };
+    store[key] = { state, dispatch: new Set() } as StoreItem<T>;
     isInitStore[key] = true;
   }
   return () => subscribeStore<T>(key);
