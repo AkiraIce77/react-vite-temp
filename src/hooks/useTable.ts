@@ -1,62 +1,96 @@
-import { TablePaginationConfig } from 'antd';
-import { useCallback, useEffect, useState } from 'react';
+import { message, PaginationProps } from 'antd';
+import { get } from 'lodash';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
-export type IPage = {
-  limit: number;
-  page: number;
-  [propName: string]: any;
-};
-
-interface QueryParams {
-  endFetchApi?: boolean;
+export interface Params {
+  pageNum: number;
+  pageSize: number;
+  [key: string]: any;
 }
 
-/**
- *
- * @param {Function} api 接口
- * @param {Object} query endFetchApi:true
- * @returns
- */
-function useTable<T, K>(api: (params: T) => Promise<K>, query?: QueryParams & T) {
+export interface Options<T> {
+  defaultParams?: Partial<T>;
+  manual?: boolean;
+  paths?: {
+    data?: string;
+    total?: string;
+  };
+}
+
+interface ResponseData<T> {
+  total: number;
+  records: T[];
+  [key: string]: any;
+}
+
+interface Response<T> {
+  code: number;
+  error: string;
+  res: ResponseData<T>;
+  trace: string;
+}
+
+type Api<T, K> = (params: T) => Promise<Response<K>>;
+
+export function useTable<T, K = Params>(api: Api<K, T>, options?: Options<K>) {
+  const { manual, defaultParams, paths } = options || {};
+  const [data, setData] = useState<T[]>([]);
   const [loading, setLoading] = useState(false);
-  const [data, setData] = useState<K>();
+  const [total, setTotal] = useState(0);
 
-  const { page = 1, limit = 10, count = 0 } = data || ({} as any);
+  const _paths = { data: 'res.records', total: 'res.total', ...paths };
 
-  const pagination: TablePaginationConfig = {
-    current: page,
-    pageSize: limit,
-    total: count,
-    showTotal: () => `共有${count}项`,
-    position: ['bottomRight'],
+  const _params = useRef<any>({
+    pageNum: 1,
+    pageSize: 10,
+    ...defaultParams,
+  });
+
+  const pagination: PaginationProps = {
+    current: _params.current.pageNum,
+    pageSize: _params.current.pageSize,
+    total,
+    showTotal: (total) => `共${total}条`,
     showQuickJumper: true,
+    showSizeChanger: true,
+    onChange: (page: number, pageSize: number) => {
+      _params.current.pageNum = page;
+      _params.current.pageSize = pageSize;
+      fetchApi();
+    },
   };
 
-  const apiFetch: (query?: T) => void = useCallback(
-    async (query) => {
-      try {
-        setLoading(true);
-        const params = { ...page, limit, ...query };
-
-        const res = await api(params as T);
-
-        setData(res);
-        setLoading(false);
-      } catch (err) {
-        console.error(err);
-        setLoading(false);
-      }
-    },
-    [data]
-  );
-
-  useEffect(() => {
-    if (!query?.endFetchApi) {
-      apiFetch(query);
-    }
+  const fetchApi = useCallback((params?: Partial<K>) => {
+    _params.current = { ..._params.current, ...params };
+    setLoading(true);
   }, []);
 
-  return { loading, data, apiFetch, pagination };
-}
+  useEffect(() => {
+    if (!loading) return;
+    api(_params.current)
+      .then((ress) => {
+        if (ress.code !== 0) throw new Error(ress.error);
+        setData(get(ress, _paths.data) || []);
+        setTotal(get(ress, _paths.total) || 0);
+        setLoading(false);
+      })
+      .catch((err) => {
+        setLoading(false);
+        message.error(err.message);
+        console.error(err);
+      });
+  }, [loading, api, _paths.data, _paths.total]);
 
-export default useTable;
+  useEffect(() => {
+    if (manual) return;
+    fetchApi();
+  }, [manual, fetchApi]);
+
+  return {
+    data,
+    loading,
+    total,
+    pagination,
+    fetchApi,
+  };
+}
